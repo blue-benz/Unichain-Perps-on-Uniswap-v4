@@ -1,13 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.26;
 
-import {Hooks} from "@uniswap/v4-core/src/libraries/Hooks.sol";
-import {HookMiner} from "@uniswap/v4-periphery/src/utils/HookMiner.sol";
-
 import {console2} from "forge-std/Script.sol";
-import {BaseScript} from "../base/BaseScript.sol";
+import {BasePerpsScript} from "../base/BasePerpsScript.sol";
 
-contract DeployLocalV4 is BaseScript {
+contract DeployLocalV4 is BasePerpsScript {
     function run() public {
         require(block.chainid == 31337, "Local deployment only");
         /**
@@ -26,7 +23,7 @@ contract DeployLocalV4 is BaseScript {
          */
 
         vm.startBroadcast();
-        deployArtifacts();
+        setUpArtifacts();
         vm.stopBroadcast();
 
         console2.log("Deployed Permit2 at:", address(permit2));
