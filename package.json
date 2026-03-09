@@ -1,0 +1,16 @@
+{
+  "name": "unichain-perps-uniswap-v4",
+  "private": true,
+  "version": "0.1.0",
+  "packageManager": "npm@10.8.2",
+  "workspaces": [
+    "frontend",
+    "shared"
+  ],
+  "scripts": {
+    "frontend:dev": "npm run dev --workspace frontend",
+    "frontend:build": "npm run build --workspace frontend",
+    "frontend:lint": "npm run lint --workspace frontend",
+    "deps:check": "npm ls --workspaces --all"
+  }
+}
