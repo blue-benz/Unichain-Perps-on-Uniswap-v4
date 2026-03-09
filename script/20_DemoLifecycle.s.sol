@@ -135,12 +135,8 @@ contract DemoLifecycleScript is BasePerpsScript {
 
         // deterministic local demo move to trigger liquidation path.
         engine.setHook(deployer);
-        engine.captureMarkPriceFromHook(poolKey, uint160((uint256(2) ** 96) * 75 / 100), 0);
+        engine.captureMarkPriceFromHook(poolKey, uint160((uint256(2) ** 96) * 70 / 100), 0);
         engine.updateFunding(marketId);
-        _liquidate(liquidationModule, traderA, marketId);
-    }
-
-    function _liquidate(LiquidationModule module_, address trader, bytes32 market) internal {
-        module_.liquidate(trader, market);
+        liquidationModule.liquidate(traderA, marketId);
     }
 }
