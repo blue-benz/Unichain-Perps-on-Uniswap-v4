@@ -13,6 +13,8 @@ out/
 
 # Node modules
 node_modules/
+/frontend/
+/lib/
 frontend/dist/
 *.tsbuildinfo
 coverage/
