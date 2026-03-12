@@ -31,4 +31,8 @@ Optional env:
 - `COLLATERAL_TOKEN`, `CURRENCY_A`, `CURRENCY_B`
 
 ## Address registry
-Populate deployed addresses in README after broadcast completes.
+Use the canonical registry in [`deployments.md`](../deployments.md).
+It includes:
+- Unichain Sepolia deployed addresses.
+- Deployment txids and explorer URLs.
+- Latest demo run reference artifact.

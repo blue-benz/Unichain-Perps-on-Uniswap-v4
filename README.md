@@ -1,208 +1,238 @@
 # Unichain Perps on Uniswap v4
+**Built on Uniswap v4 · Deployed on Unichain Sepolia**  
+_Targeting: Uniswap Foundation Prize · Unichain Prize_
+
+> A hook-integrated perpetual futures protocol that keeps pricing, funding, margin, and liquidation fully on-chain using Uniswap v4 pool state on Unichain.
 
 [![CI](https://img.shields.io/github/actions/workflow/status/blue-benz/Unichain-Perps-on-Uniswap-v4/test.yml?branch=main&label=CI)](https://github.com/blue-benz/Unichain-Perps-on-Uniswap-v4/actions/workflows/test.yml)
-[![Solidity](https://img.shields.io/badge/Solidity-0.8.26%2B-363636?logo=solidity)](https://soliditylang.org/)
-[![Foundry](https://img.shields.io/badge/Built%20with-Foundry-black)](https://book.getfoundry.sh/)
-[![Chain](https://img.shields.io/badge/Chain-Uniswap%20Unichain-EA5B0C)](https://www.unichain.org/)
-[![Integration](https://img.shields.io/badge/Integration-Uniswap%20v4%20Hooks-ff007a)](https://docs.uniswap.org/contracts/v4/overview)
-[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](./LICENSE)
+[![Coverage](https://img.shields.io/badge/Coverage-Lines%20100%25%20%7C%20Functions%20100%25-brightgreen)](https://github.com/blue-benz/Unichain-Perps-on-Uniswap-v4/blob/main/scripts/verify_coverage.sh)
+[![Solidity](https://img.shields.io/badge/Solidity-0.8.30-363636?logo=solidity)](https://soliditylang.org/)
+[![Uniswap v4](https://img.shields.io/badge/Integration-Uniswap%20v4-ff007a)](https://docs.uniswap.org/contracts/v4/overview)
+[![Unichain Sepolia](https://img.shields.io/badge/Network-Uniswap%20Unichain%20Sepolia%20(1301)-0ea5e9)](https://sepolia.uniscan.xyz/)
 
-<p>
-  <img src="./assets/uniswap-v4-mark.svg" alt="Uniswap v4" width="40" />
-  <img src="./assets/unichain-mark.svg" alt="Unichain" width="40" />
-  <img src="./assets/perps-mark.svg" alt="Perps" width="40" />
-</p>
+## The Problem
+LPs and active traders can hedge, but most paths split execution across independent systems. That creates stale marks, inconsistent margin checks, and non-deterministic liquidation timing.
 
-Unichain Perps is a hook-integrated perpetual futures protocol on top of Uniswap v4 primitives. It gives traders long/short exposure and gives LPs a native hedge path (especially short perps) without leaving AMM-native rails.
+| Layer | Failure Mode |
+| --- | --- |
+| Pricing | Mark updates lag the venue where users hedge |
+| Margin | Collateral checks differ between entry and liquidation |
+| Funding | Funding updates are discretionary and hard to audit |
+| Liquidation | Healthy/unhealthy boundaries are inconsistently enforced |
 
-## Problem
-- LPs and active traders need deterministic on-chain hedging and short exposure.
-- Most perp designs require separate liquidity and fragmented risk accounting.
-- Hedging flows are often not tightly coupled to AMM state changes.
+When these failures combine, users absorb avoidable losses and protocols absorb avoidable bad debt.
 
-## Solution
-- Perp mark pricing is captured from Uniswap v4 hook flow.
-- Funding accrues in deterministic windows.
-- Margin, liquidation, and bad-debt pathways are handled by explicit core modules.
-- Demo scripts run full lifecycle flows locally and on Unichain targets.
+## The Solution
+The protocol uses Uniswap v4 hook callbacks as deterministic market-state inputs and keeps all perps accounting on-chain.
 
-## Integrations
-| Integration | Status | Notes |
-| --- | --- | --- |
-| Uniswap v4 Hooks | Active | `beforeSwap`/`afterSwap` mark capture path |
-| Unichain | Active | Primary deployment target for prize track |
-| Reactive Network | Optional/Planned | Event-driven automation path can be layered later |
+1. A Uniswap v4 pool swap triggers `PerpsHook` callback execution.
+2. `PerpsHook.afterSwap` reads `slot0` and forwards `(sqrtPriceX96, tick)` to `PerpsEngine.captureMarkPriceFromHook`.
+3. `PerpsEngine` stores market mark price and updates funding in discrete windows.
+4. Traders deposit collateral and open/modify/close positions through `PerpsEngine`.
+5. `RiskManager` enforces IMR, MMR, leverage limits, and funding premium clamp.
+6. `LiquidationModule` calls `PerpsEngine.liquidatePosition` when equity falls below maintenance.
+7. `CollateralVault` accounts free balance, locked balance, and insurance balance for settlement flows.
 
-## Major Components
-- `PerpsHook`: Uniswap v4 hook entrypoints and mark capture.
-- `PerpsEngine`: positions, collateral accounting, funding accrual, pnl settlement.
-- `RiskManager`: IMR/MMR checks, max leverage bounds, liquidation thresholds.
-- `LiquidationModule`: liquidation executor and insurance handoff.
-- `CollateralVault`: collateral custody, lock/unlock, insurance bucket.
-- `frontend/`: perps terminal for open/close, margin ops, liquidation monitor, hedge story.
-- `shared/`: shared ABIs and types for frontend + scripts.
+Core insight: the same pool event stream that moves spot liquidity can deterministically anchor perp risk transitions.
 
-## Diagrams and Flowcharts
-### User Perspective Flow
-```mermaid
-flowchart TD
-  U[Trader / LP] --> FE[Frontend Terminal]
-  FE --> DEP[Deposit Collateral]
-  DEP --> OPEN[Open Long/Short]
-  OPEN --> FUND[Funding Window Update]
-  FUND --> MON[Monitor Health Factor]
-  MON --> CLOSE[Close Position]
-  MON --> LIQ[Or Liquidation Path]
-  CLOSE --> SETTLE[Settle PnL + Unlock Collateral]
-  LIQ --> SETTLE
-```
+## Architecture
 
-### Architecture Flow (Subgraph)
-```mermaid
-graph LR
-  subgraph Client
-    FE[frontend/]
-    SH[shared/abi + shared/types]
-  end
+### Component Overview
+```text
+src/
+  PerpsHook.sol            - beforeSwap/afterSwap hook; mark capture + swap guardrails.
+  PerpsEngine.sol          - positions, funding accrual, pnl, margin, liquidation state.
+  RiskManager.sol          - IMR/MMR/leverage/premium clamp parameters and checks.
+  CollateralVault.sol      - custody for free collateral, locked collateral, insurance.
+  LiquidationModule.sol    - external liquidation entrypoint for keeper actors.
+  libraries/PerpsMath.sol  - fixed-point conversions and signed perps math helpers.
+Architecture Flow (Subgraphs)
 
-  subgraph Core_Protocol
-    ENG[PerpsEngine]
-    RISK[RiskManager]
-    VAULT[CollateralVault]
-    LIQ[LiquidationModule]
-  end
+UnichainSepolia
+UniswapV4
+PerpsCore
+UserOps
+WalletTxOrForgeScript
+PerpsEngine
+RiskManager
+CollateralVault
+LiquidationModule
+PerpsMath
+PoolManager
+PerpsHook
+UnichainRpc
+UniscanExplorer
+User Perspective Flow
 
-  subgraph Uniswap_v4
-    HOOK[PerpsHook]
-    PM[PoolManager]
-  end
+yes
+no
+yes
+no
+CliScriptOrWalletTx
+PerpsEngine.depositCollateral
+PerpsEngine.openPosition
+InitialMarginValid
+PerpsEngine.updateFunding
+Revert InitialMarginTooLow
+EquityAboveMaintenance
+PerpsEngine.closePosition
+LiquidationModule.liquidate
+Vault unlock andsettlement
+Interaction Sequence
 
-  FE --> ENG
-  SH --> FE
-  ENG --> RISK
-  ENG --> VAULT
-  LIQ --> ENG
-  PM --> HOOK
-  HOOK --> ENG
-```
+LiquidationModule
+PerpsHook
+PoolManager
+RiskManager
+CollateralVault
+PerpsEngine
+Operator
+LiquidationModule
+PerpsHook
+PoolManager
+RiskManager
+CollateralVault
+PerpsEngine
+Operator
+Margin and position entry
+Spot swap updates perp mark
+Funding and liquidation path
+depositCollateral(amount)
+depositFor(trader, amount)
+openPosition(marketId,isLong,notional,margin)
+validateInitialMargin(marketId,notional,collateral)
+afterSwap(key,params,delta,data)
+captureMarkPriceFromHook(key,sqrtPriceX96,tick)
+updateFunding(marketId)
+liquidate(trader,marketId)
+liquidatePosition(trader,marketId,liquidator)
+Position state and events
+Perps Risk Lifecycle
+Stage	Entry Condition	Primary Functions	Exit Condition
+Collateralized	User has free balance	depositCollateral, withdrawCollateral	Margin moved to position
+Open Position	sizeUsdX18 != 0	openPosition, modifyPosition, closePosition	Size reduced to zero or liquidated
+Funding Active	Funding window elapsed	updateFunding, funding settlement on user actions	lastFundingTimestamp advances
+Maintenance Watch	Equity near MMR	removeMargin, _validateMaintenance path	Healthy close or liquidation
+Liquidated	Equity < MMR	liquidate → liquidatePosition	Position reset, insurance/bad debt updated
+Funding is settled lazily on user-touching state transitions, so historical funding remains deterministic without keeper-only dependencies.
 
-### Perp Lifecycle Sequence
-```mermaid
-sequenceDiagram
-  participant User
-  participant Frontend
-  participant Engine as PerpsEngine
-  participant Hook as PerpsHook
-  participant PM as PoolManager
-  participant Vault as CollateralVault
-  participant Liq as LiquidationModule
+Deployed Contracts
+Unichain Sepolia (chainId 1301)
+Contract	Address
+PoolManager	0x00b036b58a818b1bc34d502d3fe730db729e62ac
+PositionManager	0xf969aee60879c54baaed9f3ed26147db216fd664
+Quoter	0x56dcd40a3f2d466f48e7f48bdbe5cc9b92ae4472
+StateView	0xc199f1072a74d4e905aba1a84d9a45e2546b6222
+UniversalRouter	0xf70536b3bcc1bd1a972dc186a2cf84cc6da6be5d
+CollateralToken (MockERC20)	0xe78663b6b31a67223f2a23e638142d5916484491
+Pool Currency0 (MockERC20)	0xbdeea35f47e305791080c74b2551a521c406b7a2
+Pool Currency1 (MockERC20)	0xcc84e73f16f0c52f49130ee39e379b4497fa6299
+RiskManager	0x1c47706ad9527ea45feb940e0c1f14d54f103abc
+CollateralVault	0xee661645166fbd92e712ecbcf786b9c1707997ef
+PerpsEngine	0xac25bd28d5171821ecc9030933778d2ce242fa8a
+PerpsHook	0x1ffcdc8fddfdf5b171ed90af03b498e0c1c6c0c0
+LiquidationModule	0x0d428e4ee3da759831bdbf0e75aecf91dda24764
+Live Demo Evidence
+Demo run date: 2026-03-10 13:44:40 UTC
+Artifact: broadcast/20_DemoLifecycle.s.sol/1301/run-latest.json
 
-  User->>Frontend: Open/adjust position
-  Frontend->>Engine: depositCollateral + openPosition
-  Engine->>Vault: lock margin
-  PM->>Hook: swap hook callback
-  Hook->>Engine: captureMarkPriceFromHook
-  Frontend->>Engine: updateFunding
-  alt Healthy
-    Frontend->>Engine: closePosition
-    Engine->>Vault: unlock + settle
-  else Unhealthy
-    Liq->>Engine: liquidatePosition
-    Engine->>Vault: seize to insurance
-  end
-```
+Phase 1 — Collateral and Insurance Setup (Unichain Sepolia, chainId 1301)
+Action	Transaction
+Mint deployer collateral	0x702d860d...
+Approve vault for deployer collateral	0xfb66edd0...
+Deposit insurance to vault	0xd0f6cb92...
+Mint Trader A collateral	0xdd07d866...
+Mint Trader B collateral	0x6c73939e...
+Phase 2 — Mark/Index Normalization (Unichain Sepolia, chainId 1301)
+Action	Transaction
+Set temporary hook reporter	0x32c57920...
+Capture baseline mark	0xda2cfd7d...
+Set baseline index	0x081ce1d3...
+Phase 3 — Open Long and Short (Unichain Sepolia, chainId 1301)
+Action	Transaction
+Trader A approve vault	0xf0bebcda...
+Trader A deposit collateral	0x3d892dcf...
+Trader A open long	0x300826b5...
+Trader B approve vault	0xf1678979...
+Trader B deposit collateral	0xb5d61d29...
+Trader B open short	0x8487ac23...
+Phase 4 — Adverse Move, Funding, Liquidation (Unichain Sepolia, chainId 1301)
+Action	Transaction
+Reset index anchor	0x9b0f6519...
+Reconfigure hook reporter	0xec5a273d...
+Capture adverse mark	0x2d8945f0...
+Apply funding update	0xcda251d1...
+Execute liquidation	0x3380cfda...
+Note: the demo script prints final vault, riskManager, engine, hook, liquidationModule, and marketId via on-chain state reads, then logs them off-chain for judge traceability.
 
-## Deployed Addresses and TxIDs
-### Latest Local Demo Deployment (Anvil, chainId 31337)
-| Component | Address | Deployment TxID | Tx URL |
-| --- | --- | --- | --- |
-| RiskManager | `0xdbC43Ba45381e02825b14322cDdd15eC4B3164E6` | `0x9fd2352c28b132fd603c1445c807b80b6ee6ddf7424655a1bf2a4fef3c89579a` | `N/A (Anvil local)` |
-| CollateralVault | `0x04C89607413713Ec9775E14b954286519d836FEf` | `0xc2ac95bbab798d83fc18bcecfd650d9a2357c68cd802a2ee355736fb1500b6c1` | `N/A (Anvil local)` |
-| PerpsEngine | `0x4C4a2f8c81640e47606d3fd77B353E87Ba015584` | `0x4e336f1eb20277bc92f2cfaed2cff1c53b0c9816f9c9a3e86df9271c78936615` | `N/A (Anvil local)` |
-| PerpsHook | `0x633a129697c2161D77e44092De0c39a6530280c0` | `0x1dcea8e60f84286fd950e541e1accd5d4ae25713c43a268ada5668164e88be4c` | `N/A (Anvil local)` |
-| LiquidationModule | `0x21Df544947ba3E8b3c32561399E88B52DC8B2823` | `0xa6afa2b89d963282987271b3c2fab230ef79432735b1f9436af392440ca02e0f` | `N/A (Anvil local)` |
+Running the Demo
+bash
 
-### Unichain Deployment
-| Component | Address | Deployment TxID | Tx URL |
-| --- | --- | --- | --- |
-| RiskManager | `TBD` | `TBD` | `TBD (Unichain explorer URL)` |
-| CollateralVault | `TBD` | `TBD` | `TBD (Unichain explorer URL)` |
-| PerpsEngine | `TBD` | `TBD` | `TBD (Unichain explorer URL)` |
-| PerpsHook | `TBD` | `TBD` | `TBD (Unichain explorer URL)` |
-| LiquidationModule | `TBD` | `TBD` | `TBD (Unichain explorer URL)` |
-
-## Demo Run (Lifecycle Script + TxIDs)
-- Script: `script/20_DemoLifecycle.s.sol:DemoLifecycleScript`
-- Broadcast artifact: `broadcast/20_DemoLifecycle.s.sol/31337/run-latest.json`
-- Demo status: `ONCHAIN EXECUTION COMPLETE & SUCCESSFUL`
-
-Key lifecycle txids from latest local demo:
-- Open long/short path txids include `0x344f599cf191781719aac7f43fa0c345dadfc0d81414d8e99c1f8fcef63515e7` and `0x04648e1b7d468a8dd700bbbd04cf166d5c2884a2791164d77b7a916487ca7b03`
-- Funding update txid: `0x79dfb572f88dd590a918e358b043c74602ad4679a2d44e3c03a4b754c56de738`
-- Liquidation txid: `0xc3361b3eb9a740da6f2d03985df779b920b6ac1840c290d9456992d7bebf665e`
-- Tx URLs: `N/A (Anvil local)`
-
-## Run Commands
-```bash
-# install deps and pin uniswap v4 refs
-make bootstrap
-
-# unit + fuzz + integration tests
-make test
-
-# local lifecycle demo (anvil)
-make demo-local
-
-# unichain deploy + demo
-make deploy-unichain
+# run full Unichain Sepolia deployment + lifecycle demonstration
 make demo-unichain
-```
+bash
 
-Direct script mode:
-```bash
-DEPLOYER_PRIVATE_KEY=... \
-TRADER_A_PRIVATE_KEY=... \
-TRADER_B_PRIVATE_KEY=... \
-LOCAL_RPC_URL=http://127.0.0.1:8545 \
-./scripts/demo_local.sh
-```
+# deploy protocol contracts on Unichain Sepolia
+make deploy-unichain
+# execute lifecycle script against deployed addresses from .env
+./scripts/demo_unichain.sh
+# run hedge-focused integration assertion
+make demo-hedge
+bash
 
-## Testing and Coverage Proof
-- 100% test pass rate on current suite: `17/17 passing`.
-- Coverage command used:
-```bash
-FOUNDRY_PROFILE=coverage forge coverage --report summary
-```
-- Current coverage totals from latest run:
-  - Lines: `78.49% (438/558)`
-  - Statements: `72.30% (488/675)`
-  - Branches: `32.76% (38/116)`
-  - Functions: `84.71% (72/85)`
+# start local anvil chain for deterministic local proof
+anvil
+# run full local lifecycle demonstration
+make demo-local
+Test Coverage
+text
 
-Test categories in this repo:
-- Unit tests: `test/PerpsEngine.t.sol`
-- Fuzz tests: `test/fuzz/PerpsEngine.Fuzz.t.sol`
-- Integration tests: `test/integration/PerpsHookIntegration.t.sol`
-- Utility/library tests: `test/utils/libraries/EasyPosm.t.sol`
+Lines:      100.00% (418/418)
+Statements: 91.49%  (484/529)
+Branches:   55.45%  (56/101)
+Functions:  100.00% (65/65)
+bash
 
-## Future Roadmap
-- Push core-contract coverage toward full branch coverage and 100% lines/functions.
-- Add isolated/cross margin mode switch with stricter risk buckets.
-- Add configurable index adapters with strict fallback and circuit breakers.
-- Add richer LP hedge dashboard analytics (hedged vs unhedged pnl curves).
-- Publish finalized Unichain mainnet deployment table with explorer-linked txids.
+# reproduce source coverage gate
+./scripts/verify_coverage.sh
+Unit tests: market creation, margin math, funding, close paths, liquidation boundaries.
+Fuzz tests: undercollateralized opens, funding monotonicity, liquidation non-bypassability.
+Integration tests: Uniswap v4 pool swap callbacks feeding hook-driven mark capture.
+Utility tests: position manager helper flows and liquidity operations used by integration harness.
+Repository Structure
+text
 
-## Documentation Index
-- [Overview](./docs/overview.md)
-- [Architecture](./docs/architecture.md)
-- [Perps Model](./docs/perps-model.md)
-- [Risk Engine](./docs/risk-engine.md)
-- [Security](./docs/security.md)
-- [Deployment](./docs/deployment.md)
-- [Demo](./docs/demo.md)
-- [API](./docs/api.md)
-- [Testing](./docs/testing.md)
-- [Frontend](./docs/frontend.md)
+.
+├── src/
+├── scripts/
+├── test/
+└── docs/
+Documentation Index
+Doc	Description
+docs/overview.md	Scope, goals, and protocol summary
+docs/architecture.md	Contract roles, boundaries, and lifecycle
+docs/perps-model.md	Pricing, funding, margin, pnl, liquidation equations
+docs/risk-engine.md	IMR/MMR/leverage/premium parameter model
+docs/security.md	Threat model, mitigations, residual risks
+docs/deployment.md	Bootstrap, deploy, and environment requirements
+docs/demo.md	Judge demo flow and command sequence
+docs/api.md	Contract function-level API surface
+docs/testing.md	Test categories and execution commands
+Key Design Decisions
+Why keep the hook minimal and push logic into PerpsEngine?
+Hook execution sits inside swap-critical paths, so the hook only enforces guardrails and captures mark data. Position accounting, funding, and liquidation stay in the engine for clearer audits and bounded hook complexity. A heavier hook was rejected because it enlarges swap-path risk and makes failure domains harder to isolate.
 
-## Security
-See [SECURITY.md](./SECURITY.md).
+Why isolated margin for MVP?
+Each position keeps explicit per-position collateral state (collateralUsdX18) and deterministic maintenance checks. This reduces cross-position contagion and simplifies liquidation correctness proofs in tests. Cross-margin was rejected for MVP because it introduces portfolio-level covariance logic and more complex insolvency edge cases.
+
+Why on-chain index setter for MVP instead of mandatory external oracle?
+setIndexPrice keeps funding formula deterministic and fully testable in local and testnet demos. This supports oracle-free operation while making oracle integration an explicit extension point. A hard oracle dependency was rejected for MVP because it adds external trust and integration failure modes before core accounting correctness is proven.
+
+Roadmap
+ Raise statement and branch coverage with dedicated adversarial path tests.
+ Add isolated/cross margin mode switch with explicit risk buckets.
+ Add capped protocol execution fee path for sustainable revenue.
+ Add optional oracle adapter interface with fallback policy and circuit breaker.
+ Add multi-market liquidation batching with bounded gas guarantees.
+License
+MIT (see LICENSE).

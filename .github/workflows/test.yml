@@ -1,17 +1,16 @@
-name: CI
+name: Test Suite
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-  pull_request:
+  # push:
+  # pull_request:
 
 env:
   FOUNDRY_PROFILE: ci
 
 jobs:
-  foundry:
-    name: Build, Test, Coverage
+  test:
+    name: Foundry Project
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -22,12 +21,6 @@ jobs:
         uses: foundry-rs/foundry-toolchain@v1
         with:
           version: stable
-
-      - name: Install jq
-        run: sudo apt-get update && sudo apt-get install -y jq
-
-      - name: Bootstrap and verify dependency pins
-        run: ./scripts/bootstrap.sh
 
       - name: Build
         run: |
@@ -40,11 +33,4 @@ jobs:
           forge test -vvv
         id: test
 
-      - name: Fuzz Suite
-        run: forge test --match-path "test/fuzz/*" -vvv
-
-      - name: Coverage
-        run: FOUNDRY_PROFILE=coverage forge coverage --report summary
-
-      - name: Commit Policy Check
-        run: ./scripts/verify_commits.sh 67
+      

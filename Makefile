@@ -23,7 +23,7 @@ integration:
 	forge test --match-path "test/integration/*" -vv
 
 coverage:
-	FOUNDRY_PROFILE=coverage forge coverage --report summary --report lcov
+	./scripts/verify_coverage.sh
 
 lint:
 	forge fmt --check

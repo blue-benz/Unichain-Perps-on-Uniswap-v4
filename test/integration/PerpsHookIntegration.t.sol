@@ -172,4 +172,34 @@ contract PerpsHookIntegrationTest is BaseTest {
         int24 observedTick = hook.lastObservedTick(PoolId.unwrap(poolId));
         assertTrue(observedTick != 0 || markAfter != 1e18);
     }
+
+    function test_hookPausedBlocksSwap() public {
+        hook.setGuardrails(0, true);
+
+        vm.expectRevert();
+        swapRouter.swapExactTokensForTokens({
+            amountIn: 1e18,
+            amountOutMin: 0,
+            zeroForOne: true,
+            poolKey: poolKey,
+            hookData: Constants.ZERO_BYTES,
+            receiver: address(this),
+            deadline: block.timestamp + 1
+        });
+    }
+
+    function test_hookMaxImpactGuardrailBlocksLargeSwap() public {
+        hook.setGuardrails(1e18, false);
+
+        vm.expectRevert();
+        swapRouter.swapExactTokensForTokens({
+            amountIn: 2e18,
+            amountOutMin: 0,
+            zeroForOne: true,
+            poolKey: poolKey,
+            hookData: Constants.ZERO_BYTES,
+            receiver: address(this),
+            deadline: block.timestamp + 1
+        });
+    }
 }

@@ -115,7 +115,11 @@ contract DeployPerpsScript is BasePerpsScript {
         Currency currencyB = Currency.wrap(vm.envOr("CURRENCY_B", address(0)));
 
         if (Currency.unwrap(currencyA) == address(0) || Currency.unwrap(currencyB) == address(0)) {
-            (currencyA, currencyB) = deployCurrencyPair();
+            // On live networks, avoid helper paths that rely on script-contract state.
+            address tokenA = address(new MockERC20("Perps Asset A", "PAA", 18));
+            address tokenB = address(new MockERC20("Perps Asset B", "PAB", 18));
+            currencyA = Currency.wrap(tokenA);
+            currencyB = Currency.wrap(tokenB);
         }
 
         (currency0, currency1) = _sortCurrencies(currencyA, currencyB);

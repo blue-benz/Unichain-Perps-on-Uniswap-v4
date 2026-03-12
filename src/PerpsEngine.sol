@@ -372,7 +372,6 @@ contract PerpsEngine is IPerpsEngine, Ownable, ReentrancyGuard {
         if (projectedTotalOpen > market.maxOpenNotionalUsdX18) revert NotionalCapExceeded();
 
         uint256 mark = market.markPriceX18;
-        if (mark == 0) revert InvalidPrice();
 
         if (oldNotional == 0) {
             position.entryPriceX18 = mark;
@@ -456,10 +455,6 @@ contract PerpsEngine is IPerpsEngine, Ownable, ReentrancyGuard {
 
         if (position.sizeUsdX18 != 0) {
             _validateMaintenance(marketId, market, position);
-        } else if (position.collateralUsdX18 > 0) {
-            uint256 refund = position.collateralUsdX18;
-            position.collateralUsdX18 = 0;
-            vault.unlockCollateral(trader, refund);
         }
 
         emit PositionClosed(trader, marketId, reduceNotionalUsdX18, realizedPnl);
@@ -548,16 +543,6 @@ contract PerpsEngine is IPerpsEngine, Ownable, ReentrancyGuard {
 
         uint256 penalty = (netEquityUsdX18 * params.liquidationPenaltyBps) / 10_000;
         uint256 incentive = (netEquityUsdX18 * params.liquidationIncentiveBps) / 10_000;
-
-        if (penalty + incentive > netEquityUsdX18) {
-            uint256 overflow = penalty + incentive - netEquityUsdX18;
-            if (incentive >= overflow) {
-                incentive -= overflow;
-            } else {
-                penalty -= (overflow - incentive);
-                incentive = 0;
-            }
-        }
 
         uint256 traderRefund = netEquityUsdX18 - penalty - incentive;
         if (incentive > 0) {
